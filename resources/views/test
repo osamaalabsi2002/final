@@ -1,0 +1,435 @@
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Models\Appointment;
+use App\Models\Employee;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
+
+class AppointmentsController extends Controller
+{
+    public function index()
+    {
+        // Redirect to login if the user is not authenticated
+        if (!Auth::check()) {
+            return redirect()->route('login')->with('error', 'You must be logged in to view appointments.');
+        }
+
+        // Get the authenticated user's ID
+        $userId = Auth::id();
+        $appointments = Appointment::where('user_id', $userId)->get();
+
+        return view('/booking', compact('appointments'));
+    }
+
+    // Show available booking slots for a barber (employee) for the next 7 days
+    public function booking($employeeId)
+    {
+        // Retrieve the employee based on the ID
+        $employee = Employee::findOrFail($employeeId);
+        $weekDays = collect();
+
+        // Loop through the next 7 days to generate available time slots
+        for ($i = 1; $i <= 7; $i++) {
+            $date = now()->addDays($i)->format('Y-m-d');
+
+            // Fetch appointments for this date and employee where status is 'booked'
+            $appointments = Appointment::where('employee_id', $employeeId)
+                ->whereDate('appointment_date', $date)
+                ->where('status', 'booked')  // Only consider booked appointments
+                ->pluck('start_time')  // Get the start time
+                ->toArray();
+
+
+            $timeSlots = ['09:00 AM', '10:00 AM', '11:00 AM', '12:00 PM', '01:00 PM', '02:00 PM', '03:00 PM'];
+            $availableTimeSlots = [];
+
+            foreach ($timeSlots as $timeSlot) {
+                $formattedTimeSlot = date("H:i:s", strtotime($timeSlot)); // Convert to 24-hour format
+
+                // Check if this time slot is booked
+                $availableTimeSlots[] = [
+                    'time' => $timeSlot,
+                    'is_booked' => in_array($formattedTimeSlot, $appointments) // Mark as booked if exists
+                ];
+            }
+
+            // Add day and time slots
+            $weekDays->add([
+                'day' => now()->addDays($i)->format('d'),
+                'month' => now()->addDays($i)->format('m'),
+                'year' => now()->addDays($i)->format('Y'),
+                'timeSlots' => $availableTimeSlots,
+            ]);
+        }
+
+        return view('booking', compact('employee', 'weekDays'));
+    }
+
+    // Store the appointment in the database
+    public function store(Request $request)
+    {
+        // Validate input, including the appointment_date from the hidden input
+        $request->validate([
+            'appointment_date' => 'required|date', // Ensure appointment_date is present and valid
+            'start_time' => 'required',
+            'employee_id' => 'required|exists:employees,id',
+        ]);
+    
+        try {
+            // Convert start_time to 24-hour format (MySQL DATETIME compatible)
+            $startTime = date("H:i:s", strtotime($request->start_time));
+    
+            // Get the appointment_date from the form (this is coming from the hidden input)
+            $appointmentDate = $request->input('appointment_date');
+    
+            // Check if the slot is already booked
+            $existingAppointment = Appointment::where('employee_id', $request->employee_id)
+                ->where('appointment_date', $appointmentDate)
+                ->where('start_time', $startTime)
+                ->where('status', 'booked')  // Only consider 'booked' slots
+                ->first();
+    
+            if ($existingAppointment) {
+                // Flash error message to session if the slot is already booked
+                return redirect()->back()->with('error', 'This time slot is already booked.');
+            }
+    
+            // If slot is available, create a new appointment
+            $appointment = new Appointment();
+            $appointment->user_id = Auth::id();
+            $appointment->start_time = $startTime;  // Use the 24-hour formatted start time
+            $appointment->employee_id = $request->input('employee_id');
+            $appointment->appointment_date = $appointmentDate;
+            $appointment->status = 'booked';
+            $appointment->save();
+    
+            // Flash success message to session
+            return redirect()->back()->with('success', 'Appointment successfully booked.');
+    
+        } catch (\Exception $e) {
+            // Flash error message to session if there's an exception
+            return redirect()->back()->with('error', 'Error creating appointment: ' . $e->getMessage());
+        }
+    }
+    
+    
+}    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+بدون كومينت 
+
+@extends('layouts.APPa')
+
+@section('content')
+
+
+
+<style>
+    .work-image {
+        width: 100%;        
+        height: 200px;      
+        object-fit: cover;  
+        border-radius: 10px; 
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1); 
+    }
+   /* Styling for the employee detail section */
+   .employee-detail-container {
+        display: flex;
+        align-items: flex-start;
+        gap: 20px;
+    }
+
+    .employee-image {
+        width: 300px;
+        height: auto;
+        border-radius: 10px;
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    }
+
+    .employee-info {
+        font-family: Arial, sans-serif;
+        max-width: 600px;
+    }
+
+    .employee-info h2 {
+        font-size: 26px;
+        margin-bottom: 10px;
+    }
+
+    .employee-info p {
+        font-size: 16px;
+        line-height: 1.6;
+        color: #555;
+        margin-bottom: 15px;
+    }
+
+    .employee-info ul {
+        list-style-type: none;
+        padding: 0;
+    }
+
+    .employee-info ul li {
+        font-size: 16px;
+        margin-bottom: 10px;
+    }
+
+    .employee-info ul li strong {
+        color: #333;
+    }
+</style>
+
+<div class="ec-main-content">
+    <div class="ec-main-section">
+        <div class="container">
+            <div class="row">
+                <div class="col-md-12 employee-detail-container">
+                    <!-- Employee Image -->
+                    <figure>
+                        <img src="{{ asset('img/' . $employee->image) }}" alt="{{ $employee->first_name }} {{ $employee->last_name }}" class="employee-image">
+                    </figure>
+                    <!-- Employee Info -->
+                    <div class="employee-info">
+                        <h2>About {{ $employee->first_name }} {{ $employee->last_name }}</h2>
+                        <p>{{ $employee->description }}</p>
+                        <ul>
+                            <li><strong>Phone Number:</strong> {{ $employee->phone_number }}</li>
+                            <li><strong>Email:</strong> <a href="mailto:{{ $employee->email }}">{{ $employee->email }}</a></li>
+                            <li><strong>Joined:</strong> {{ $employee->created_at->format('Y/m/d') }}</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
+
+
+
+
+
+
+                    <h3>Some work from {{ $employee->first_name }}</h3>
+
+<div class="col-md-12">
+    <div class="ec-team ec-modren-team">
+        <ul class="row">
+            @foreach ($works as $work)
+            <li class="col-md-3">
+                <div class="ec-team-wrapper">
+                    <figure>
+                        <!-- Work Image -->
+                        <img src="{{ asset('img/works/' . $work->image) }}" alt="Work Image" class="work-image">
+                    </figure>
+                </div>
+            </li>
+            @endforeach
+        </ul>
+    </div>
+</div>
+
+
+
+
+
+<div class="ec-form">
+    <div class="ec-content-title">
+    </div>
+    <form action="{{ route('booknow', ['employeeId' => $employee->id]) }}" method="GET">
+        <p class="ec-submit"><input type="submit" value="Book Now" class="ec-bgcolor"></p>
+    </form>
+</div>
+
+                    </div>
+
+
+
+
+
+
+                    <div class="clearfix"></div>
+                    <div class="ec-content-title">
+                        <h2>Experience</h2>
+                    </div>
+                    <ul class="ec-process-list">
+                        <li>
+                            <span class="num">1</span>
+                            <div class="ec-text">
+                                <h6>25% Off All Services on Your First Visit</h6>
+                                <p><span class="dash"></span>This forward much far about reciprocating so one yikes informal conjoint ...</p>
+                            </div>
+                        </li>
+                        <li>
+                            <span class="num">2</span>
+                            <div class="ec-text">
+                                <h6>50% Off All Services on Your First Visit</h6>
+                                <p><span class="dash"></span>Far darn much hello after much hummed that much this...</p>
+                            </div>
+                        </li>
+                    </ul>
+                    <!--// Comment Form //-->
+                    <div class="ec-form">
+                        <div class="ec-content-title">
+                            <h2>Quick Contact</h2>
+                        </div>
+                        <form>
+                            <p><input type="text" placeholder="Your Name" name="usrname" required></p>
+                            <p><input type="text" placeholder="Email" name="usrname" required></p>
+                            <p><input type="text" placeholder="Website" name="usrname" required></p>
+                            <p class="ec-comment"><textarea placeholder="Comment"></textarea></p>
+                            <p class="ec-submit"><input type="submit" value="Send" class="ec-bgcolor"></p>
+                        </form>
+                    </div>
+                    <!--// Comment Form //-->
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+
+
+
+
+
+
+
+@endsection
+
+
+
+
+
+
+
+
+
+
+
+
+
+عشان اللوج ان
+
+body {
+    background: linear-gradient(135deg, #1c1c1c, #333, #4d4d4d);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    margin: 0;
+    font-family: 'Roboto', sans-serif;
+    color: #fff;
+}
+
+.container {
+    position: relative;
+    max-width: 800px;
+    width: 100%;
+    background: #fff;
+    padding: 40px;
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+    display: flex;
+}
+
+.cover {
+    flex: 1;
+    background: #6e44ff;
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 20px;
+}
+
+.cover img {
+    max-width: 100%;
+    height: auto;
+}
+
+.forms {
+    flex: 1;
+    padding: 20px;
+}
+
+.form-content .title {
+    font-size: 24px;
+    margin-bottom: 20px;
+    color: #333;
+}
+
+.input-box {
+    display: flex;
+    align-items: center;
+    margin-bottom: 15px;
+    border-bottom: 2px solid #ddd;
+    padding-bottom: 8px;
+}
+
+.input-box i {
+    color: #e5a427;
+    margin-right: 10px;
+}
+
+.input-box input {
+    width: 100%;
+    padding: 8px;
+    border: none;
+    outline: none;
+    background: none;
+    font-size: 16px;
+    color: #333;
+}
+
+.input-box input::placeholder {
+    color: #888;
+}
+
+.button input {
+    width: 100%;
+    padding: 10px;
+    background-color: #e5a427;
+    color: #fff;
+    border: none;
+    font-size: 18px;
+    cursor: pointer;
+    transition: 0.3s;
+}
+
+.button input:hover {
+    background-color: #d2922b;
+}
+
+.text a {
+    color: #e5a427;
+    text-decoration: none;
+}
+
+.text a:hover {
+    color: #d2922b;
+}
+
+.sign-up-text {
+    font-size: 14px;
+    color: #666;
+} 
